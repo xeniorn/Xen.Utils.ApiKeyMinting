@@ -1,0 +1,52 @@
+<Project>
+
+	<!--
+	    Shared packaging setup for every project in this repository that ships a NuGet package.
+
+	    Imported explicitly by each csproj rather than picked up automatically as Directory.Build.props, so a
+	    project states its heritage on its own face: you can see where its packaging comes from without knowing
+	    the folder layout.
+
+	    A csproj keeps only what is genuinely its own - PackageId, Version, Description, PackageTags, and its
+	    target framework.
+	-->
+
+	<PropertyGroup>
+		<Authors>Juraj Ahel</Authors>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<PackageReadmeFile Condition="Exists('$(MSBuildProjectDirectory)\README.md')">README.md</PackageReadmeFile>
+
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<EmbedAllSources>true</EmbedAllSources>
+		<ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+		<Deterministic>true</Deterministic>
+		<DebugType>embedded</DebugType>
+	</PropertyGroup>
+
+	<ItemGroup Condition="Exists('$(MSBuildProjectDirectory)\README.md')">
+		<None Include="README.md" Pack="true" PackagePath="\" />
+	</ItemGroup>
+
+	<PropertyGroup>
+		<!--This entry needs to exist in nuget.config-->
+		<NugetSourceName>github_vbc_proteomics</NugetSourceName>
+		<!--This env var needs to exist and hold a PAT with write access to the feed-->
+		<NugetApiKeyEnvVar>TOKEN_GITHUB_NUGET_VBCPROTEOMICS</NugetApiKeyEnvVar>
+	</PropertyGroup>
+
+	<!--
+	    Publish on pack, for local development: pack in Debug and the Release artifact goes to the feed.
+	    TODO: use this mechanism only for devel. Use github actions on a tagged version for the real release.
+
+	    Both the pack and the push name Release deliberately. This previously packed Release and then pushed
+	    $(PackageOutputPath), which in a Debug build resolves to bin\Debug - so every package published this way
+	    shipped unoptimised IL with DEBUG defined, and the Release artifact it had just built was discarded.
+
+	    The Debug condition is also what stops the inner Release pack from recursing back into this target.
+	-->
+	<Target Name="NugetPush" AfterTargets="Pack" Condition="'$(Configuration)' == 'Debug'">
+		<Exec Command="dotnet pack &quot;$(MSBuildProjectFullPath)&quot; --configuration Release" />
+		<Exec Command="dotnet nuget push &quot;$(MSBuildProjectDirectory)\bin\Release\$(PackageId).$(PackageVersion).nupkg&quot; --source $(NugetSourceName) --api-key %$(NugetApiKeyEnvVar)% --skip-duplicate" />
+	</Target>
+
+</Project>
