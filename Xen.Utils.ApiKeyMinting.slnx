@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Util.ApiKeyMinting/Util.ApiKeyMinting.csproj" />
+  <Project Path="Util.ApiKeyMinting.Test/Util.ApiKeyMinting.Test.csproj" />
+</Solution>

@@ -1,0 +1,59 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<!-- multi-targeted deliberately, unlike the net10.0-only ecosystem tools: the whole point of this package
+		     is that it carries no framework opinions, so it should not impose a runtime one either -->
+		<TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+
+		<!-- NuGet -->
+		<PackageId>Xen.Utils.ApiKeyMinting</PackageId>
+		<Version>1.0.0</Version>
+		<Authors>Juraj Ahel</Authors>
+		<Description>Delegated, self-service API key minting: who may hand out which permissions, for how long, and whether an issued key is still worth anything. Carries no framework dependencies - permissions and policies are plain strings, and persistence is an interface.</Description>
+		<PackageTags>api;security;authorization;apikey</PackageTags>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<EmbedAllSources>true</EmbedAllSources>
+		<ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+		<Deterministic>true</Deterministic>
+		<DebugType>embedded</DebugType>
+	</PropertyGroup>
+
+	<PropertyGroup>
+		<!--This entry needs to exist in nuget.config-->
+		<NugetSourceName>github_vbc_proteomics</NugetSourceName>
+		<!--This env var needs to exist and have a properly formatted value-->
+		<NugetApiKeyEnvVar>TOKEN_GITHUB_NUGET_VBCPROTEOMICS</NugetApiKeyEnvVar>
+	</PropertyGroup>
+
+	<!--TODO: use this mechanism only for devel, to a separate repo. Use github actions on tagged version for publishing the actual versioned nuget pkg-->
+	<!-- publish nuget package per right-click -->
+	<!-- set up the PAT (Personal access token) of a user with access to the repo to env var TOKEN_GITHUB_NUGET_VBCPROTEOMICS -->
+	<Target Name="NugetPush" AfterTargets="Pack" Condition="'$(Configuration)' == 'Debug'">
+		<Exec Command="dotnet pack --configuration Release" />
+		<Exec Command="dotnet nuget push $(PackageOutputPath)$(PackageId).$(Version).nupkg --source $(NugetSourceName) --api-key %$(NugetApiKeyEnvVar)% --skip-duplicate" />
+	</Target>
+
+	<ItemGroup>
+		<None Update="README.md" Pack="true" PackagePath="">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+	</ItemGroup>
+
+	<!--
+	    The only dependency, and only for ILogger. Nothing else: no authorization framework, no EF Core, no
+	    ASP.NET. Persistence and the policy/endpoint catalogs are interfaces the host implements.
+	-->
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.1" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="Util.ApiKeyMinting.Test" />
+	</ItemGroup>
+
+</Project>
