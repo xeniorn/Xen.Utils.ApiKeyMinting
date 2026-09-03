@@ -62,7 +62,7 @@ public class MintingServiceTests
         Assert.Equal(Billing, result.Key.MintedUnderSubject);
         Assert.Equal(_time.GetUtcNow(), result.Key.CreatedUtc);
         Assert.Equal(_time.GetUtcNow().AddDays(10), result.Key.ExpiresUtc);
-        Assert.Equal("test-reverse", result.Key.HashAlgorithmId);
+        Assert.Equal(ReversibleHasher.Reverse, result.Key.HashAlgorithmId);
         Assert.Equal("grant-0", result.Key.Permissions.Single().SourceGrantId);
     }
 
@@ -142,6 +142,31 @@ public class MintingServiceTests
             () => CreateSut().MintAsync(Request(["CanViewBillingInfo"], label: "  "), [Billing]));
 
         Assert.Contains("label is required", error.Message);
+    }
+
+    /// <summary>The algorithm is chosen per key, and recorded on it, rather than fixed for the application.</summary>
+    [Fact]
+    public async Task KeyRecordsTheAlgorithmItWasMintedUnder()
+    {
+        GivenGrant("CanViewBillingInfo");
+
+        var result = await CreateSut().MintAsync(
+            Request(["CanViewBillingInfo"]) with { HashAlgorithmId = ReversibleHasher.Upper }, [Billing]);
+
+        Assert.Equal(ReversibleHasher.Upper, result.Key.HashAlgorithmId);
+        Assert.Equal(result.PlaintextApiKey.ToUpperInvariant(), result.Key.KeyHash);
+    }
+
+    [Fact]
+    public async Task UnknownAlgorithm_IsRefused()
+    {
+        GivenGrant("CanViewBillingInfo");
+
+        var error = await Assert.ThrowsAsync<MintingRefusedException>(() => CreateSut().MintAsync(
+            Request(["CanViewBillingInfo"]) with { HashAlgorithmId = "sha3-nope" }, [Billing]));
+
+        Assert.Contains("sha3-nope", error.Message);
+        Assert.Empty(_keys.Keys);
     }
 
     [Fact]

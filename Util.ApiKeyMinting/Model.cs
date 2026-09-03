@@ -49,6 +49,16 @@ public sealed record MintingGrant(
 public sealed record MintedKeyPermission(string Permission, string? SourceGrantId);
 
 /// <summary>
+/// One digest of the key a caller presented: which algorithm produced it, and the resulting value.
+/// </summary>
+/// <remarks>
+/// A caller sends one key, and the host derives every digest it knows how to. Matching on the pair rather than on
+/// the hash alone is what lets keys stored under different algorithms coexist - the algorithm is a property of
+/// the stored key, not of the application, so moving the default forward does not invalidate anything.
+/// </remarks>
+public sealed record PresentedApiKeyDigest(string AlgorithmId, string Hash);
+
+/// <summary>
 /// An issued key. Only the hash is ever stored; the plaintext exists once, in the response to the mint call.
 /// </summary>
 public sealed record MintedKey(

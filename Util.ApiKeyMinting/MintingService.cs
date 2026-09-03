@@ -8,6 +8,7 @@ namespace Util.ApiKeyMinting;
 /// <param name="Permissions">What the key should carry.</param>
 /// <param name="Label">Short name, so the key can be recognised in the list later. Required.</param>
 /// <param name="RequestedLifetime">Defaults and caps apply.</param>
+/// <param name="HashAlgorithmId">Which digest to store the key under. Defaults to the hasher's default.</param>
 /// <param name="Description">What the key is for.</param>
 /// <param name="MintedBy">Stable id of the person minting it.</param>
 /// <param name="MintedByDisplayName">Their readable name, for the listing.</param>
@@ -17,6 +18,7 @@ public sealed record MintRequest(
     IReadOnlyCollection<string> Permissions,
     string Label,
     TimeSpan? RequestedLifetime = null,
+    string? HashAlgorithmId = null,
     string? Description = null,
     string? MintedBy = null,
     string? MintedByDisplayName = null);
@@ -87,13 +89,19 @@ public sealed class MintingService(
         var lifetime = ResolveLifetime(request, authorityResult);
         var nowUtc = _time.GetUtcNow();
 
+        var algorithmId = request.HashAlgorithmId ?? hasher.DefaultAlgorithmId;
+
+        if (!hasher.AlgorithmIds.Contains(algorithmId, StringComparer.Ordinal))
+            throw new MintingRefusedException(
+                $"Unknown hash algorithm '{algorithmId}'. Known: {string.Join(", ", hasher.AlgorithmIds)}.");
+
         var plaintext = generator.Generate();
 
         var key = new MintedKey(
             Id: Guid.NewGuid().ToString("N"),
             Scope: request.Scope,
-            KeyHash: hasher.Hash(plaintext),
-            HashAlgorithmId: hasher.AlgorithmId,
+            KeyHash: hasher.Hash(plaintext, algorithmId),
+            HashAlgorithmId: algorithmId,
             Permissions: request.Permissions
                 .Distinct(StringComparer.Ordinal)
                 .Select(x => new MintedKeyPermission(x, authorityResult.For(x)?.BackingGrantIds.FirstOrDefault()))

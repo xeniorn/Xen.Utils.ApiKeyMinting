@@ -34,8 +34,11 @@ public sealed class FakeKeyStore : IMintedKeyStore
     public List<MintedKey> Keys { get; } = [];
     public int TouchCount { get; private set; }
 
-    public Task<MintedKey?> FindByHashAsync(string scope, string keyHash, CancellationToken token = default)
-        => Task.FromResult(Keys.FirstOrDefault(x => x.Scope == scope && x.KeyHash == keyHash));
+    public Task<MintedKey?> FindByDigestAsync(
+        string scope, IReadOnlyCollection<PresentedApiKeyDigest> presented, CancellationToken token = default)
+        => Task.FromResult(Keys.FirstOrDefault(x =>
+            x.Scope == scope &&
+            presented.Any(p => p.AlgorithmId == x.HashAlgorithmId && p.Hash == x.KeyHash)));
 
     public Task<IReadOnlyList<MintedKey>> ListAsync(string scope, bool includeRevoked, CancellationToken token = default)
         => Task.FromResult<IReadOnlyList<MintedKey>>(
@@ -70,12 +73,29 @@ public sealed class FakeKeyStore : IMintedKeyStore
     }
 }
 
-/// <summary>Not a hash at all, just something reversible so tests can read the fixtures.</summary>
+/// <summary>
+/// Not hashes at all, just something reversible so tests can read the fixtures. Two of them, because the point of
+/// the contract is that several algorithms coexist and each stored key remembers its own.
+/// </summary>
 public sealed class ReversibleHasher : IApiKeyHasher
 {
-    public string AlgorithmId => "test-reverse";
+    public const string Reverse = "test-reverse";
+    public const string Upper = "test-upper";
 
-    public string Hash(string apiKey) => new(apiKey.Reverse().ToArray());
+    public string DefaultAlgorithmId => Reverse;
+
+    public IReadOnlyCollection<string> AlgorithmIds { get; } = [Reverse, Upper];
+
+    public string Hash(string apiKey, string? algorithmId = null) => (algorithmId ?? DefaultAlgorithmId) switch
+    {
+        Reverse => new string(apiKey.Reverse().ToArray()),
+        Upper => apiKey.ToUpperInvariant(),
+        var other => throw new ArgumentOutOfRangeException(nameof(algorithmId), other, "Unknown algorithm.")
+    };
+
+    /// <summary>Every digest of a key, as the authentication layer would present them.</summary>
+    public PresentedApiKeyDigest[] DigestsOf(string apiKey)
+        => [.. AlgorithmIds.Select(x => new PresentedApiKeyDigest(x, Hash(apiKey, x)))];
 }
 
 public sealed class FixedKeyGenerator(params string[] keys) : IApiKeyGenerator

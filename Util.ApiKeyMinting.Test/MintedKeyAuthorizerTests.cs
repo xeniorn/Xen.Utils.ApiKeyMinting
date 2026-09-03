@@ -8,6 +8,11 @@ public class MintedKeyAuthorizerTests
 {
     private const string Scope = "app";
     private const string Hash = "hash";
+    private const string Algorithm = "test-reverse";
+
+    /// <summary>What the authentication layer hands over: one digest per algorithm the host understands.</summary>
+    private static PresentedApiKeyDigest[] Presented(string hash = Hash, string algorithm = Algorithm)
+        => [new PresentedApiKeyDigest(algorithm, hash)];
 
     private static readonly SubjectSelector BillingRole = new("roles", "Billing");
 
@@ -32,7 +37,7 @@ public class MintedKeyAuthorizerTests
             Id: "key-1",
             Scope: Scope,
             KeyHash: Hash,
-            HashAlgorithmId: "test",
+            HashAlgorithmId: Algorithm,
             Permissions: permissions.Select(x => new MintedKeyPermission(x, sourceGrantId)).ToArray(),
             MintedUnderSubject: subject ?? BillingRole,
             Label: "test key",
@@ -43,7 +48,7 @@ public class MintedKeyAuthorizerTests
     [Fact]
     public async Task UnknownHash_IsNotFound()
     {
-        var result = await CreateSut().AuthorizeAsync(Scope, "nothing-like-this");
+        var result = await CreateSut().AuthorizeAsync(Scope, Presented("nothing-like-this"));
 
         Assert.Equal(MintedKeyStatus.NotFound, result.Status);
         Assert.Empty(result.LivePermissions);
@@ -55,7 +60,7 @@ public class MintedKeyAuthorizerTests
         GivenGrant("grant-1", "CanViewBillingInfo");
         GivenKey(["CanViewBillingInfo"]);
 
-        var result = await CreateSut().AuthorizeAsync(Scope, Hash);
+        var result = await CreateSut().AuthorizeAsync(Scope, Presented());
 
         Assert.Equal(MintedKeyStatus.Active, result.Status);
         Assert.Equal(["CanViewBillingInfo"], result.LivePermissions);
@@ -67,7 +72,7 @@ public class MintedKeyAuthorizerTests
         GivenGrant("grant-1", "CanViewBillingInfo");
         GivenKey(["CanViewBillingInfo"], expiresUtc: _time.GetUtcNow().AddSeconds(-1));
 
-        var result = await CreateSut().AuthorizeAsync(Scope, Hash);
+        var result = await CreateSut().AuthorizeAsync(Scope, Presented());
 
         Assert.Equal(MintedKeyStatus.Expired, result.Status);
         Assert.Empty(result.LivePermissions);
@@ -79,7 +84,7 @@ public class MintedKeyAuthorizerTests
         GivenGrant("grant-1", "CanViewBillingInfo");
         GivenKey(["CanViewBillingInfo"], revokedUtc: _time.GetUtcNow().AddHours(-1));
 
-        var result = await CreateSut().AuthorizeAsync(Scope, Hash);
+        var result = await CreateSut().AuthorizeAsync(Scope, Presented());
 
         Assert.Equal(MintedKeyStatus.Revoked, result.Status);
         Assert.Empty(result.LivePermissions);
@@ -94,7 +99,7 @@ public class MintedKeyAuthorizerTests
         var before = _keys.Keys.Single();
 
         await _grants.SetActiveAsync(Scope, "grant-1", isActive: false, actor: "someone");
-        var result = await CreateSut().AuthorizeAsync(Scope, Hash);
+        var result = await CreateSut().AuthorizeAsync(Scope, Presented());
 
         Assert.Equal(MintedKeyStatus.Suspended, result.Status);
         Assert.Empty(result.LivePermissions);
@@ -111,11 +116,11 @@ public class MintedKeyAuthorizerTests
         GivenKey(["CanViewBillingInfo"]);
 
         await _grants.SetActiveAsync(Scope, "grant-1", isActive: false, actor: null);
-        Assert.Equal(MintedKeyStatus.Suspended, (await CreateSut().AuthorizeAsync(Scope, Hash)).Status);
+        Assert.Equal(MintedKeyStatus.Suspended, (await CreateSut().AuthorizeAsync(Scope, Presented())).Status);
 
         await _grants.SetActiveAsync(Scope, "grant-1", isActive: true, actor: null);
 
-        var result = await CreateSut().AuthorizeAsync(Scope, Hash);
+        var result = await CreateSut().AuthorizeAsync(Scope, Presented());
 
         Assert.Equal(MintedKeyStatus.Active, result.Status);
         Assert.Equal(["CanViewBillingInfo"], result.LivePermissions);
@@ -132,11 +137,11 @@ public class MintedKeyAuthorizerTests
         GivenKey(["CanViewBillingInfo"], sourceGrantId: "grant-1");
 
         _grants.Grants.Clear();
-        Assert.Equal(MintedKeyStatus.Suspended, (await CreateSut().AuthorizeAsync(Scope, Hash)).Status);
+        Assert.Equal(MintedKeyStatus.Suspended, (await CreateSut().AuthorizeAsync(Scope, Presented())).Status);
 
         GivenGrant("a-completely-different-id", "CanViewBillingInfo");
 
-        var result = await CreateSut().AuthorizeAsync(Scope, Hash);
+        var result = await CreateSut().AuthorizeAsync(Scope, Presented());
 
         Assert.Equal(MintedKeyStatus.Active, result.Status);
         Assert.Equal(["CanViewBillingInfo"], result.LivePermissions);
@@ -151,7 +156,7 @@ public class MintedKeyAuthorizerTests
 
         await _grants.SetActiveAsync(Scope, "grant-2", isActive: false, actor: null);
 
-        var result = await CreateSut().AuthorizeAsync(Scope, Hash);
+        var result = await CreateSut().AuthorizeAsync(Scope, Presented());
 
         Assert.Equal(MintedKeyStatus.Active, result.Status);
         Assert.Equal(["CanViewBillingInfo"], result.LivePermissions);
@@ -166,9 +171,53 @@ public class MintedKeyAuthorizerTests
         GivenGrant("grant-1", "CanViewBillingInfo", subject: new SubjectSelector("roles", "SomeoneElse"));
         GivenKey(["CanViewBillingInfo"], subject: BillingRole);
 
-        var result = await CreateSut().AuthorizeAsync(Scope, Hash);
+        var result = await CreateSut().AuthorizeAsync(Scope, Presented());
 
         Assert.Equal(MintedKeyStatus.Suspended, result.Status);
+    }
+
+    /// <summary>
+    /// A key stores which digest it was written under, so presenting every digest of the same key still resolves
+    /// to it. This is what lets md5 and sha256 keys live in one store.
+    /// </summary>
+    [Fact]
+    public async Task KeyIsFoundByWhicheverDigestItWasStoredUnder()
+    {
+        GivenGrant("grant-1", "CanViewBillingInfo");
+        GivenKey(["CanViewBillingInfo"]);
+
+        var everyDigest = new PresentedApiKeyDigest[]
+        {
+            new("some-other-algorithm", "a-different-hash"),
+            new(Algorithm, Hash)
+        };
+
+        var result = await CreateSut().AuthorizeAsync(Scope, everyDigest);
+
+        Assert.Equal(MintedKeyStatus.Active, result.Status);
+    }
+
+    /// <summary>
+    /// The algorithm is half the key of the lookup. A hash that happens to collide with a key stored under a
+    /// different algorithm must not match it, or the algorithm would be decoration.
+    /// </summary>
+    [Fact]
+    public async Task SameHashUnderADifferentAlgorithm_DoesNotMatch()
+    {
+        GivenGrant("grant-1", "CanViewBillingInfo");
+        GivenKey(["CanViewBillingInfo"]);
+
+        var result = await CreateSut().AuthorizeAsync(Scope, Presented(Hash, "some-other-algorithm"));
+
+        Assert.Equal(MintedKeyStatus.NotFound, result.Status);
+    }
+
+    [Fact]
+    public async Task NoDigestsPresented_IsNotFound()
+    {
+        var result = await CreateSut().AuthorizeAsync(Scope, []);
+
+        Assert.Equal(MintedKeyStatus.NotFound, result.Status);
     }
 
     [Fact]
@@ -179,14 +228,14 @@ public class MintedKeyAuthorizerTests
 
         var sut = CreateSut();
 
-        await sut.AuthorizeAsync(Scope, Hash);
-        await sut.AuthorizeAsync(Scope, Hash);
-        await sut.AuthorizeAsync(Scope, Hash);
+        await sut.AuthorizeAsync(Scope, Presented());
+        await sut.AuthorizeAsync(Scope, Presented());
+        await sut.AuthorizeAsync(Scope, Presented());
 
         Assert.Equal(1, _keys.TouchCount);
 
         _time.Advance(TimeSpan.FromMinutes(5));
-        await sut.AuthorizeAsync(Scope, Hash);
+        await sut.AuthorizeAsync(Scope, Presented());
 
         Assert.Equal(2, _keys.TouchCount);
     }

@@ -43,11 +43,19 @@ public sealed class MintedKeyAuthorizer(
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private readonly ILogger _logger = logger ?? NullLogger<MintedKeyAuthorizer>.Instance;
 
-    /// <summary>Resolves a presented key hash to the permissions it carries right now.</summary>
+    /// <summary>
+    /// Resolves the digests of a presented key to the permissions it carries right now.
+    /// </summary>
+    /// <param name="presented">
+    /// One entry per algorithm the host understands, all derived from the same key. The stored key is matched on
+    /// algorithm and hash together, so which digest it was written under is its own property.
+    /// </param>
     public async Task<MintedKeyAuthorization> AuthorizeAsync(
-        string scope, string keyHash, CancellationToken token = default)
+        string scope, IReadOnlyCollection<PresentedApiKeyDigest> presented, CancellationToken token = default)
     {
-        if (await keyStore.FindByHashAsync(scope, keyHash, token) is not { } key)
+        if (presented.Count == 0) return MintedKeyAuthorization.NotFound;
+
+        if (await keyStore.FindByDigestAsync(scope, presented, token) is not { } key)
             return MintedKeyAuthorization.NotFound;
 
         var nowUtc = _time.GetUtcNow();

@@ -27,8 +27,16 @@ public interface IMintingGrantStore
 /// </summary>
 public interface IMintedKeyStore
 {
-    /// <summary>The key a presented hash belongs to, if any. This is on the authentication path.</summary>
-    Task<MintedKey?> FindByHashAsync(string scope, string keyHash, CancellationToken token = default);
+    /// <summary>
+    /// The key one of the presented digests belongs to, if any. This is on the authentication path.
+    /// </summary>
+    /// <param name="presented">
+    /// Every digest derived from the key the caller sent - one per algorithm the host understands. A stored key
+    /// matches when both its algorithm and its hash match one of them, so a key written under md5 is found by the
+    /// md5 digest and one written under sha256 by the sha256 digest, with no ambiguity between them.
+    /// </param>
+    Task<MintedKey?> FindByDigestAsync(
+        string scope, IReadOnlyCollection<PresentedApiKeyDigest> presented, CancellationToken token = default);
 
     /// <summary>Keys in the scope, for the management view.</summary>
     Task<IReadOnlyList<MintedKey>> ListAsync(string scope, bool includeRevoked, CancellationToken token = default);
@@ -57,11 +65,24 @@ public interface IMintedKeyStore
 /// </remarks>
 public interface IApiKeyHasher
 {
-    /// <summary>Stored alongside each key, so keys hashed under different algorithms can coexist.</summary>
-    string AlgorithmId { get; }
+    /// <summary>
+    /// Used when a key is minted without naming an algorithm. Stored on the key, so the digest a key was written
+    /// under is a property of that key rather than of the application.
+    /// </summary>
+    string DefaultAlgorithmId { get; }
 
-    /// <summary>The stored, comparable form of a plaintext key.</summary>
-    string Hash(string apiKey);
+    /// <summary>
+    /// Every algorithm this host can hash under. A key may be stored under any of them; which one is recorded on
+    /// the key itself, so keys of different vintages coexist and neither has to be reissued when the default moves.
+    /// </summary>
+    IReadOnlyCollection<string> AlgorithmIds { get; }
+
+    /// <summary>
+    /// The stored, comparable form of a plaintext key under <paramref name="algorithmId"/>, or under
+    /// <see cref="DefaultAlgorithmId"/> when that is null.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The algorithm is not one of <see cref="AlgorithmIds"/>.</exception>
+    string Hash(string apiKey, string? algorithmId = null);
 }
 
 /// <summary>
