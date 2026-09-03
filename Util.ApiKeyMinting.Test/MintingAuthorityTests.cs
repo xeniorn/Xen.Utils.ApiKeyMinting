@@ -211,4 +211,85 @@ public class MintingAuthorityTests
 
         Assert.Equal([Billing], result.AvailableSubjects);
     }
+
+    /// <summary>
+    /// One role can be named by several grants. Different permissions simply add up - that is how a role gets a
+    /// useful set without one enormous grant row.
+    /// </summary>
+    [Fact]
+    public void SeveralGrantsForOneSubject_AddUp()
+    {
+        var result = CreateSut().Evaluate(
+            [
+                Grant("g1", Billing, "CanViewBillingInfo"),
+                Grant("g2", Billing, "CanEditBillingInfo")
+            ],
+            Caller(Billing),
+            KnownPermissions);
+
+        Assert.Equal(
+            ["CanEditBillingInfo", "CanViewBillingInfo"],
+            result.DelegablePermissions.OrderBy(x => x, StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    /// And several grants can name the same role and the same permission, differing only in how long a key may
+    /// live. The most generous wins: a grant is a permission to do something, so a second one can widen what the
+    /// first allowed but is not a restriction on it. Both are recorded as backing it.
+    /// </summary>
+    [Fact]
+    public void SeveralGrantsForOnePermission_TakeTheMostGenerousLifetime()
+    {
+        var result = CreateSut().Evaluate(
+            [
+                Grant("tight", Billing, "CanViewBillingInfo", maxLifetime: TimeSpan.FromDays(7)),
+                Grant("loose", Billing, "CanViewBillingInfo", maxLifetime: TimeSpan.FromDays(90))
+            ],
+            Caller(Billing),
+            KnownPermissions);
+
+        var availability = result.For("CanViewBillingInfo")!;
+
+        Assert.True(availability.IsDelegable);
+        Assert.Equal(TimeSpan.FromDays(90), availability.MaxKeyLifetime);
+        Assert.Equal(["tight", "loose"], availability.BackingGrantIds);
+    }
+
+    /// <summary>A grant stating no maximum means "up to the ceiling", so it beats any that states one.</summary>
+    [Fact]
+    public void AGrantWithoutAMaximum_BeatsOneWithA()
+    {
+        var result = CreateSut().Evaluate(
+            [
+                Grant("tight", Billing, "CanViewBillingInfo", maxLifetime: TimeSpan.FromDays(7)),
+                Grant("open", Billing, "CanViewBillingInfo")
+            ],
+            Caller(Billing),
+            KnownPermissions);
+
+        Assert.Equal(
+            new MintingOptions().AbsoluteMaxKeyLifetime,
+            result.For("CanViewBillingInfo")!.MaxKeyLifetime);
+    }
+
+    /// <summary>
+    /// Withdrawing one of several grants leaves the permission standing on the others, which is the same rule
+    /// that decides whether a key keeps working: any active grant for the subject and permission will do.
+    /// </summary>
+    [Fact]
+    public void WithdrawingOneOfSeveral_LeavesThePermissionStanding()
+    {
+        var result = CreateSut().Evaluate(
+            [
+                Grant("withdrawn", Billing, "CanViewBillingInfo", isActive: false),
+                Grant("still-there", Billing, "CanViewBillingInfo")
+            ],
+            Caller(Billing),
+            KnownPermissions);
+
+        var availability = result.For("CanViewBillingInfo")!;
+
+        Assert.True(availability.IsDelegable);
+        Assert.Equal(["still-there"], availability.BackingGrantIds);
+    }
 }
