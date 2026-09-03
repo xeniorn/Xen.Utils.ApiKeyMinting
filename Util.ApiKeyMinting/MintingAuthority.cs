@@ -54,6 +54,13 @@ public sealed record MintingAuthorityResult(
 
         return tightest;
     }
+
+    /// <summary>
+    /// Whether a key carrying all of <paramref name="permissions"/> may be minted without an expiry: only when
+    /// nothing caps it, meaning every permission is delegable with no maximum of its own.
+    /// </summary>
+    public bool MayMintWithoutExpiry(IEnumerable<string> permissions)
+        => permissions.All(x => For(x) is { IsDelegable: true, MaxKeyLifetime: null });
 }
 
 /// <summary>
@@ -128,14 +135,15 @@ public sealed class MintingAuthority(MintingOptions options)
     /// Several grants may cover the same permission; the caller gets the most generous of them, then the global
     /// ceiling. A grant with no stated maximum means "up to the ceiling".
     /// </summary>
-    private TimeSpan BestLifetime(IReadOnlyCollection<MintingGrant> backing)
+    private TimeSpan? BestLifetime(IReadOnlyCollection<MintingGrant> backing)
     {
+        // a grant that states no maximum means "up to the ceiling", and with no ceiling either that is unlimited
         var mostGenerous = backing.Any(x => x.MaxKeyLifetime is null)
             ? options.AbsoluteMaxKeyLifetime
             : backing.Max(x => x.MaxKeyLifetime!.Value);
 
-        return mostGenerous < options.AbsoluteMaxKeyLifetime
-            ? mostGenerous
-            : options.AbsoluteMaxKeyLifetime;
+        if (options.AbsoluteMaxKeyLifetime is not { } ceiling) return mostGenerous;
+
+        return mostGenerous is { } best && best < ceiling ? best : ceiling;
     }
 }

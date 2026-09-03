@@ -84,7 +84,7 @@ public sealed record MintedKey(
     SubjectSelector MintedUnderSubject,
     string Label,
     DateTimeOffset CreatedUtc,
-    DateTimeOffset ExpiresUtc,
+    DateTimeOffset? ExpiresUtc,
     string? Description = null,
     string? MintedBy = null,
     string? MintedByDisplayName = null,
@@ -97,7 +97,8 @@ public sealed record MintedKey(
     public bool IsRevoked => RevokedUtc is not null;
 
     /// <summary>Expiry is mandatory, because a key outlives whoever minted it and their role changes.</summary>
-    public bool IsExpiredAt(DateTimeOffset nowUtc) => ExpiresUtc <= nowUtc;
+    /// <summary>A key with no expiry never becomes stale on its own; only revocation or a lost grant stops it.</summary>
+    public bool IsExpiredAt(DateTimeOffset nowUtc) => ExpiresUtc is { } expiry && expiry <= nowUtc;
 }
 
 /// <summary>

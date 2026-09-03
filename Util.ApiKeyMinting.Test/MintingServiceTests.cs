@@ -236,4 +236,56 @@ public class MintingServiceTests
 
         Assert.Contains("Not permitted to delegate", error.Message);
     }
+
+    [Fact]
+    public async Task AKeyWithNoExpiry_IsRefusedWhileAnAbsoluteCeilingStands()
+    {
+        GivenGrant("CanViewBillingInfo");
+
+        var error = await Assert.ThrowsAsync<MintingRefusedException>(
+            () => CreateSut().MintAsync(Request(["CanViewBillingInfo"]) with { NeverExpires = true }, Caller(Billing)));
+
+        Assert.Contains("capped at", error.Message);
+    }
+
+    [Fact]
+    public async Task AKeyWithNoExpiry_IsMintedWhenNothingCapsIt()
+    {
+        _options.AbsoluteMaxKeyLifetime = null;
+        GivenGrant("CanViewBillingInfo");
+
+        var result = await CreateSut().MintAsync(
+            Request(["CanViewBillingInfo"]) with { NeverExpires = true }, Caller(Billing));
+
+        Assert.Null(result.Key.ExpiresUtc);
+        Assert.False(result.Key.IsExpiredAt(_time.GetUtcNow() + TimeSpan.FromDays(100_000)));
+    }
+
+    /// <summary>
+    /// A grant that states a maximum is stating one, and the ceiling being lifted does not undo that.
+    /// </summary>
+    [Fact]
+    public async Task AKeyWithNoExpiry_IsRefusedWhenAGrantCapsTheLifetime()
+    {
+        _options.AbsoluteMaxKeyLifetime = null;
+        GivenGrant("CanViewBillingInfo", maxLifetime: TimeSpan.FromDays(30));
+
+        var error = await Assert.ThrowsAsync<MintingRefusedException>(
+            () => CreateSut().MintAsync(Request(["CanViewBillingInfo"]) with { NeverExpires = true }, Caller(Billing)));
+
+        Assert.Contains("without a maximum lifetime", error.Message);
+    }
+
+    /// <summary>With no ceiling and no grant maximum, a long finite lifetime is simply allowed.</summary>
+    [Fact]
+    public async Task WithNoCeiling_ALongLifetimeIsAllowed()
+    {
+        _options.AbsoluteMaxKeyLifetime = null;
+        GivenGrant("CanViewBillingInfo");
+
+        var result = await CreateSut().MintAsync(
+            Request(["CanViewBillingInfo"], TimeSpan.FromDays(3650)), Caller(Billing));
+
+        Assert.Equal(_time.GetUtcNow() + TimeSpan.FromDays(3650), result.Key.ExpiresUtc);
+    }
 }

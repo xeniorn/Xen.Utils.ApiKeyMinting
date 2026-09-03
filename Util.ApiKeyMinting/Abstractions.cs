@@ -149,7 +149,11 @@ public sealed class MintingOptions
     public TimeSpan DefaultKeyLifetime { get; set; } = TimeSpan.FromDays(90);
 
     /// <summary>Ceiling applied on top of whatever the matching grants allow.</summary>
-    public TimeSpan AbsoluteMaxKeyLifetime { get; set; } = TimeSpan.FromDays(365);
+    /// <remarks>
+    /// Null lifts the ceiling entirely, which is what makes a never-expiring key possible: one may only be minted
+    /// when nothing caps it - neither this nor any grant backing the permissions asked for.
+    /// </remarks>
+    public TimeSpan? AbsoluteMaxKeyLifetime { get; set; } = TimeSpan.FromDays(365);
 
     /// <summary>How stale a key's LastUsed timestamp may get before another write is worth it.</summary>
     public TimeSpan LastUsedWriteThrottle { get; set; } = TimeSpan.FromMinutes(1);
