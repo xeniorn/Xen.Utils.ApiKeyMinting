@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Util.ApiKeyMinting;
@@ -52,15 +52,15 @@ public sealed class MintingService(
     /// What this caller may hand out, with every known permission annotated so the UI can grey out the rest.
     /// </summary>
     public async Task<MintingAuthorityResult> GetAuthorityAsync(
-        string scope, IReadOnlyCollection<SubjectSelector> callerSubjects, CancellationToken token = default)
+        string scope, MintingCaller caller, CancellationToken token = default)
     {
         var grants = await grantStore.GetAllAsync(scope, token);
-        return authority.Evaluate(grants, callerSubjects, policyCatalog.KnownPermissions);
+        return authority.Evaluate(grants, caller, policyCatalog.KnownPermissions);
     }
 
     /// <summary>Issues a key, or throws <see cref="MintingRefusedException"/> if the caller may not.</summary>
     public async Task<MintResult> MintAsync(
-        MintRequest request, IReadOnlyCollection<SubjectSelector> callerSubjects, CancellationToken token = default)
+        MintRequest request, MintingCaller caller, CancellationToken token = default)
     {
         if (string.IsNullOrWhiteSpace(request.Label))
             throw new MintingRefusedException("A label is required, so the key can be recognised later.");
@@ -68,11 +68,13 @@ public sealed class MintingService(
         if (request.Permissions.Count == 0)
             throw new MintingRefusedException("A key with no permissions would do nothing.");
 
-        if (!callerSubjects.Contains(request.MintUnderSubject))
+        if (!caller.MayActAsAnySubject && !caller.Subjects.Contains(request.MintUnderSubject))
             throw new MintingRefusedException(
                 $"Cannot mint under '{request.MintUnderSubject}': the caller does not hold it.");
 
-        var authorityResult = await GetAuthorityAsync(request.Scope, [request.MintUnderSubject], token);
+        // Always evaluated against the target subject alone, unrestricted caller or not: acting for a role means
+        // taking that role's grants, not adding one's own to them.
+        var authorityResult = await GetAuthorityAsync(request.Scope, new MintingCaller([request.MintUnderSubject]), token);
 
         var refused = request.Permissions
             .Where(x => !authorityResult.DelegablePermissions.Contains(x))

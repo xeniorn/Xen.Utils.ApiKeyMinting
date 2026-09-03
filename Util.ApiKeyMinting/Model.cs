@@ -1,4 +1,4 @@
-namespace Util.ApiKeyMinting;
+﻿namespace Util.ApiKeyMinting;
 
 /// <summary>
 /// Identifies <em>who</em> a grant applies to, as a plain claim type/value pair - typically a role
@@ -57,6 +57,20 @@ public sealed record MintedKeyPermission(string Permission, string? SourceGrantI
 /// the stored key, not of the application, so moving the default forward does not invalidate anything.
 /// </remarks>
 public sealed record PresentedApiKeyDigest(string AlgorithmId, string Hash);
+
+/// <summary>
+/// Who is asking to mint, and how far their reach goes.
+/// </summary>
+/// <param name="Subjects">The subjects the caller actually holds, e.g. their roles.</param>
+/// <param name="MayActAsAnySubject">
+/// When true the caller may mint under a subject they do not hold - an administrator issuing a key on behalf of a
+/// role. It widens <em>whose</em> grants they may draw on, never <em>what</em> a grant allows: a key minted this
+/// way still carries only what an active grant gives that subject, and still dies when the grant goes. Someone who
+/// can edit grants can already reach the same place in two steps; this only removes the detour.
+/// </param>
+public sealed record MintingCaller(
+    IReadOnlyCollection<SubjectSelector> Subjects,
+    bool MayActAsAnySubject = false);
 
 /// <summary>
 /// An issued key. Only the hash is ever stored; the plaintext exists once, in the response to the mint call.

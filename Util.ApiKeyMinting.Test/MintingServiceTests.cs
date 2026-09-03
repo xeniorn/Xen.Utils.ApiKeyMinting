@@ -1,4 +1,4 @@
-namespace Util.ApiKeyMinting.Test;
+﻿namespace Util.ApiKeyMinting.Test;
 
 /// <summary>
 /// Issuing keys, and refusing to issue the ones a caller is not entitled to.
@@ -38,12 +38,17 @@ public class MintingServiceTests
         string[] permissions, TimeSpan? lifetime = null, SubjectSelector? subject = null, string label = "reporting key")
         => new(Scope, subject ?? Billing, permissions, label, lifetime, MintedBy: "someone@example.org");
 
+    private static MintingCaller Caller(params SubjectSelector[] subjects) => new(subjects);
+
+    /// <summary>An administrator: holds nothing in particular, may act for any subject.</summary>
+    private static MintingCaller Unrestricted => new([], MayActAsAnySubject: true);
+
     [Fact]
     public async Task MintingStoresOnlyTheHash_AndReturnsThePlaintextOnce()
     {
         GivenGrant("CanViewBillingInfo");
 
-        var result = await CreateSut().MintAsync(Request(["CanViewBillingInfo"]), [Billing]);
+        var result = await CreateSut().MintAsync(Request(["CanViewBillingInfo"]), Caller(Billing));
 
         Assert.Equal("ptk_abc123", result.PlaintextApiKey);
         Assert.Equal(new string("ptk_abc123".Reverse().ToArray()), result.Key.KeyHash);
@@ -55,7 +60,7 @@ public class MintingServiceTests
     {
         GivenGrant("CanViewBillingInfo");
 
-        var result = await CreateSut().MintAsync(Request(["CanViewBillingInfo"], TimeSpan.FromDays(10)), [Billing]);
+        var result = await CreateSut().MintAsync(Request(["CanViewBillingInfo"], TimeSpan.FromDays(10)), Caller(Billing));
 
         Assert.Equal("reporting key", result.Key.Label);
         Assert.Equal("someone@example.org", result.Key.MintedBy);
@@ -72,7 +77,7 @@ public class MintingServiceTests
         GivenGrant("CanViewBillingInfo");
 
         var error = await Assert.ThrowsAsync<MintingRefusedException>(
-            () => CreateSut().MintAsync(Request(["CanEditBillingInfo"]), [Billing]));
+            () => CreateSut().MintAsync(Request(["CanEditBillingInfo"]), Caller(Billing)));
 
         Assert.Contains("CanEditBillingInfo", error.Message);
         Assert.Empty(_keys.Keys);
@@ -84,7 +89,7 @@ public class MintingServiceTests
         GivenGrant("HasAdminLikeAccess");
 
         var error = await Assert.ThrowsAsync<MintingRefusedException>(
-            () => CreateSut().MintAsync(Request(["HasAdminLikeAccess"]), [Billing]));
+            () => CreateSut().MintAsync(Request(["HasAdminLikeAccess"]), Caller(Billing)));
 
         Assert.Contains("never mintable", error.Message);
     }
@@ -98,7 +103,7 @@ public class MintingServiceTests
         GivenGrant("CanViewBillingInfo", subject: Instruments);
 
         var error = await Assert.ThrowsAsync<MintingRefusedException>(
-            () => CreateSut().MintAsync(Request(["CanViewBillingInfo"], subject: Instruments), [Billing]));
+            () => CreateSut().MintAsync(Request(["CanViewBillingInfo"], subject: Instruments), Caller(Billing)));
 
         Assert.Contains("does not hold", error.Message);
     }
@@ -109,7 +114,7 @@ public class MintingServiceTests
         GivenGrant("CanViewBillingInfo", maxLifetime: TimeSpan.FromDays(7));
 
         var error = await Assert.ThrowsAsync<MintingRefusedException>(
-            () => CreateSut().MintAsync(Request(["CanViewBillingInfo"], TimeSpan.FromDays(30)), [Billing]));
+            () => CreateSut().MintAsync(Request(["CanViewBillingInfo"], TimeSpan.FromDays(30)), Caller(Billing)));
 
         Assert.Contains("exceeds the maximum", error.Message);
     }
@@ -119,7 +124,7 @@ public class MintingServiceTests
     {
         GivenGrant("CanViewBillingInfo");
 
-        var result = await CreateSut().MintAsync(Request(["CanViewBillingInfo"]), [Billing]);
+        var result = await CreateSut().MintAsync(Request(["CanViewBillingInfo"]), Caller(Billing));
 
         Assert.Equal(_time.GetUtcNow() + _options.DefaultKeyLifetime, result.Key.ExpiresUtc);
     }
@@ -128,7 +133,7 @@ public class MintingServiceTests
     public async Task KeyWithNoPermissions_IsRefused()
     {
         var error = await Assert.ThrowsAsync<MintingRefusedException>(
-            () => CreateSut().MintAsync(Request([]), [Billing]));
+            () => CreateSut().MintAsync(Request([]), Caller(Billing)));
 
         Assert.Contains("no permissions", error.Message);
     }
@@ -139,7 +144,7 @@ public class MintingServiceTests
         GivenGrant("CanViewBillingInfo");
 
         var error = await Assert.ThrowsAsync<MintingRefusedException>(
-            () => CreateSut().MintAsync(Request(["CanViewBillingInfo"], label: "  "), [Billing]));
+            () => CreateSut().MintAsync(Request(["CanViewBillingInfo"], label: "  "), Caller(Billing)));
 
         Assert.Contains("label is required", error.Message);
     }
@@ -151,7 +156,7 @@ public class MintingServiceTests
         GivenGrant("CanViewBillingInfo");
 
         var result = await CreateSut().MintAsync(
-            Request(["CanViewBillingInfo"]) with { HashAlgorithmId = ReversibleHasher.Upper }, [Billing]);
+            Request(["CanViewBillingInfo"]) with { HashAlgorithmId = ReversibleHasher.Upper }, Caller(Billing));
 
         Assert.Equal(ReversibleHasher.Upper, result.Key.HashAlgorithmId);
         Assert.Equal(result.PlaintextApiKey.ToUpperInvariant(), result.Key.KeyHash);
@@ -163,7 +168,7 @@ public class MintingServiceTests
         GivenGrant("CanViewBillingInfo");
 
         var error = await Assert.ThrowsAsync<MintingRefusedException>(() => CreateSut().MintAsync(
-            Request(["CanViewBillingInfo"]) with { HashAlgorithmId = "sha3-nope" }, [Billing]));
+            Request(["CanViewBillingInfo"]) with { HashAlgorithmId = "sha3-nope" }, Caller(Billing)));
 
         Assert.Contains("sha3-nope", error.Message);
         Assert.Empty(_keys.Keys);
@@ -174,7 +179,7 @@ public class MintingServiceTests
     {
         GivenGrant("CanViewBillingInfo");
         var sut = CreateSut();
-        var minted = await sut.MintAsync(Request(["CanViewBillingInfo"]), [Billing]);
+        var minted = await sut.MintAsync(Request(["CanViewBillingInfo"]), Caller(Billing));
 
         await sut.RevokeAsync(Scope, minted.Key.Id, "admin@example.org", "leaked in a ticket");
 
@@ -189,10 +194,46 @@ public class MintingServiceTests
     {
         GivenGrant("CanViewBillingInfo");
 
-        var authority = await CreateSut().GetAuthorityAsync(Scope, [Billing]);
+        var authority = await CreateSut().GetAuthorityAsync(Scope, Caller(Billing));
 
         Assert.Equal(["CanViewBillingInfo"], authority.DelegablePermissions);
         Assert.Equal(PermissionBlockReason.NeverMintable, authority.For("HasAdminLikeAccess")!.BlockReason);
         Assert.Equal(PermissionBlockReason.NoActiveGrant, authority.For("CanEditBillingInfo")!.BlockReason);
+    }
+
+    [Fact]
+    public async Task UnrestrictedCaller_MintsUnderASubjectItDoesNotHold()
+    {
+        GivenGrant("CanViewBillingInfo", subject: Instruments);
+
+        var result = await CreateSut().MintAsync(
+            Request(["CanViewBillingInfo"], subject: Instruments), Unrestricted);
+
+        Assert.Equal(Instruments, result.Key.MintedUnderSubject);
+        Assert.Equal(["CanViewBillingInfo"], result.Key.Permissions.Select(x => x.Permission));
+    }
+
+    [Fact]
+    public async Task UnrestrictedCaller_TakesTheTargetSubjectsGrantsOnly()
+    {
+        // the grant belongs to Billing, the key is minted for Instruments - acting for a role does not carry
+        // another role's entitlements along
+        GivenGrant("CanViewBillingInfo", subject: Billing);
+
+        var error = await Assert.ThrowsAsync<MintingRefusedException>(
+            () => CreateSut().MintAsync(Request(["CanViewBillingInfo"], subject: Instruments), Unrestricted));
+
+        Assert.Contains("Not permitted to delegate", error.Message);
+    }
+
+    [Fact]
+    public async Task UnrestrictedCaller_IsStillHeldToTheDenyList()
+    {
+        GivenGrant("HasAdminLikeAccess", subject: Instruments);
+
+        var error = await Assert.ThrowsAsync<MintingRefusedException>(
+            () => CreateSut().MintAsync(Request(["HasAdminLikeAccess"], subject: Instruments), Unrestricted));
+
+        Assert.Contains("Not permitted to delegate", error.Message);
     }
 }

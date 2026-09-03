@@ -1,4 +1,4 @@
-namespace Util.ApiKeyMinting;
+﻿namespace Util.ApiKeyMinting;
 
 /// <summary>
 /// One permission, and whether this caller may hand it out.
@@ -24,7 +24,9 @@ public sealed record PermissionAvailability(
 /// Deliberately the full set rather than just the allowed subset: the UI shows everything and greys out what the
 /// caller cannot delegate, so people can see what exists and go ask for it instead of wondering.
 /// </remarks>
-public sealed record MintingAuthorityResult(IReadOnlyList<PermissionAvailability> Permissions)
+public sealed record MintingAuthorityResult(
+    IReadOnlyList<PermissionAvailability> Permissions,
+    IReadOnlyList<SubjectSelector> AvailableSubjects)
 {
     /// <summary>Just the permissions this caller may hand out.</summary>
     public IReadOnlySet<string> DelegablePermissions { get; } = Permissions
@@ -63,15 +65,27 @@ public sealed class MintingAuthority(MintingOptions options)
     /// <summary>Annotates every known permission for a caller holding <paramref name="callerSubjects"/>.</summary>
     public MintingAuthorityResult Evaluate(
         IReadOnlyCollection<MintingGrant> grants,
-        IReadOnlyCollection<SubjectSelector> callerSubjects,
+        MintingCaller caller,
         IReadOnlyCollection<string> knownPermissions)
     {
         var neverMintable = options.NeverMintablePermissions.ToHashSet(StringComparer.Ordinal);
-        var subjects = callerSubjects.ToHashSet();
+        var subjects = caller.Subjects.ToHashSet();
 
+        // an unrestricted caller draws on every active grant rather than only the ones naming a subject they hold
         var applicable = grants
-            .Where(x => x.IsActive && subjects.Contains(x.Subject))
+            .Where(x => x.IsActive && (caller.MayActAsAnySubject || subjects.Contains(x.Subject)))
             .ToArray();
+
+        // what the caller may mint under. For an unrestricted caller that is every subject some active grant
+        // names - a subject with no grant behind it would only produce a key with nothing on it.
+        var availableSubjects = caller.MayActAsAnySubject
+            ? applicable
+                .Select(x => x.Subject)
+                .Distinct()
+                .OrderBy(x => x.ClaimType, StringComparer.Ordinal)
+                .ThenBy(x => x.ClaimValue, StringComparer.Ordinal)
+                .ToArray()
+            : [.. caller.Subjects];
 
         // a permission the caller can delegate but that the app does not (yet) declare is still worth showing,
         // otherwise a stale grant becomes invisible
@@ -107,7 +121,7 @@ public sealed class MintingAuthority(MintingOptions options)
             })
             .ToArray();
 
-        return new MintingAuthorityResult(availabilities);
+        return new MintingAuthorityResult(availabilities, availableSubjects);
     }
 
     /// <summary>
