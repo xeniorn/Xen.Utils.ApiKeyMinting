@@ -35,17 +35,24 @@
 	</PropertyGroup>
 
 	<!--
-	    Publish on pack, for local development: pack in Debug and the Release artifact goes to the feed.
+	    Publish on pack, for local development: packing in Debug OR Release always ends with the Release
+	    artifact going to the feed.
 	    TODO: use this mechanism only for devel. Use github actions on a tagged version for the real release.
 
 	    Both the pack and the push name Release deliberately. This previously packed Release and then pushed
 	    $(PackageOutputPath), which in a Debug build resolves to bin\Debug - so every package published this way
 	    shipped unoptimised IL with DEBUG defined, and the Release artifact it had just built was discarded.
 
-	    The Debug condition is also what stops the inner Release pack from recursing back into this target.
+	    Split into two targets rather than one guarded by Configuration != Release: the Debug entry point
+	    launches a nested `dotnet pack` process to produce the Release artifact, and that nested process is
+	    itself a fresh build with Configuration=Release - so it runs NugetPushRelease on its own and pushes.
+	    A single target with an inverted condition would push a second time from the outer Debug process too.
 	-->
-	<Target Name="NugetPush" AfterTargets="Pack" Condition="'$(Configuration)' == 'Debug'">
+	<Target Name="NugetRepackRelease" AfterTargets="Pack" Condition="'$(Configuration)' == 'Debug'">
 		<Exec Command="dotnet pack &quot;$(MSBuildProjectFullPath)&quot; --configuration Release" />
+	</Target>
+
+	<Target Name="NugetPushRelease" AfterTargets="Pack" Condition="'$(Configuration)' == 'Release'">
 		<Exec Command="dotnet nuget push &quot;$(MSBuildProjectDirectory)\bin\Release\$(PackageId).$(PackageVersion).nupkg&quot; --source $(NugetSourceName) --api-key %$(NugetApiKeyEnvVar)% --skip-duplicate" />
 	</Target>
 
