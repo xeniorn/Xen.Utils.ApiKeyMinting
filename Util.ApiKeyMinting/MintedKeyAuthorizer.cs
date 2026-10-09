@@ -23,7 +23,8 @@ public sealed record MintedKeyAuthorization(
 /// </summary>
 /// <remarks>
 /// <para>
-/// A permission is live only while an active grant still authorises it for the subject the key was minted under.
+/// A permission is live only while an active grant still authorises it for the subject it was minted under (the
+/// key's subject, or for a key minted under several subjects, the one recorded on the permission).
 /// So removing a grant suspends its keys immediately, and reinstating it brings them back - which is why the
 /// check matches on <c>(subject, permission)</c> rather than on the grant id recorded at mint time. A grant that
 /// is deleted and re-created gets a new id, and the keys must survive that.
@@ -68,14 +69,15 @@ public sealed class MintedKeyAuthorizer(
 
         var grants = await grantStore.GetAllAsync(scope, token);
 
+        // each permission against the subject it was granted under (a key can span several)
         var stillGranted = grants
-            .Where(x => x.IsActive && x.Subject == key.MintedUnderSubject)
-            .Select(x => x.GrantablePermission)
-            .ToHashSet(StringComparer.Ordinal);
+            .Where(x => x.IsActive)
+            .Select(x => (x.Subject, x.GrantablePermission))
+            .ToHashSet();
 
         var live = key.Permissions
+            .Where(x => stillGranted.Contains((key.SubjectOf(x), x.Permission)))
             .Select(x => x.Permission)
-            .Where(stillGranted.Contains)
             .ToHashSet(StringComparer.Ordinal);
 
         if (live.Count == 0)

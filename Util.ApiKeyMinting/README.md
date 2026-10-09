@@ -17,6 +17,9 @@ key was minted under**. Everything else follows from that:
 - Withdrawing a grant suspends every key that depended on it, immediately and without touching those keys.
 - Reinstating the grant revives them. The check matches on `(subject, permission)`, not on the grant id recorded at
   mint time, because reinstating often means re-creating and that yields a new id.
+- One key can span several subjects the caller holds (`MintRequest.AdditionalSubjects`), for someone with
+  several roles. Each permission then records the subject backing it, and only that subject's grant decides
+  whether it is live.
 
 ## Pieces
 

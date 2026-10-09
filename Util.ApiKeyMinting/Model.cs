@@ -46,7 +46,12 @@ public sealed record MintingGrant(
 /// the permission is still live, because a grant that is removed and re-created gets a new id and must still
 /// revive its keys. See <see cref="MintedKeyAuthorizer"/>.
 /// </param>
-public sealed record MintedKeyPermission(string Permission, string? SourceGrantId);
+/// <param name="Subject">
+/// The subject whose grant backs this permission - what decides whether it is still live. A key minted under
+/// several subjects carries permissions from each. Null (keys minted before this existed, or a store that does not
+/// persist it) means <see cref="MintedKey.MintedUnderSubject"/>; see <see cref="MintedKey.SubjectOf"/>.
+/// </param>
+public sealed record MintedKeyPermission(string Permission, string? SourceGrantId, SubjectSelector? Subject = null);
 
 /// <summary>
 /// One digest of the key a caller presented: which algorithm produced it, and the resulting value.
@@ -95,6 +100,9 @@ public sealed record MintedKey(
 {
     /// <summary>Revocation is permanent. Unlike a suspended key, a revoked one never comes back.</summary>
     public bool IsRevoked => RevokedUtc is not null;
+
+    /// <summary>The subject whose grant backs <paramref name="permission"/>: its own, or else the key's.</summary>
+    public SubjectSelector SubjectOf(MintedKeyPermission permission) => permission.Subject ?? MintedUnderSubject;
 
     /// <summary>Expiry is mandatory, because a key outlives whoever minted it and their role changes.</summary>
     /// <summary>A key with no expiry never becomes stale on its own; only revocation or a lost grant stops it.</summary>

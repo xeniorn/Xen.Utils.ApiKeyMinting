@@ -17,6 +17,10 @@ namespace Util.ApiKeyMinting;
 /// <param name="Description">What the key is for.</param>
 /// <param name="MintedBy">Stable id of the person minting it.</param>
 /// <param name="MintedByDisplayName">Their readable name, for the listing.</param>
+/// <param name="AdditionalSubjects">
+/// Further subjects the caller holds whose grants may back permissions on the same key - one key for someone with
+/// several roles. Each permission records the subject backing it, and lives or dies with that subject's grant.
+/// </param>
 public sealed record MintRequest(
     string Scope,
     SubjectSelector MintUnderSubject,
@@ -27,7 +31,8 @@ public sealed record MintRequest(
     string? HashAlgorithmId = null,
     string? Description = null,
     string? MintedBy = null,
-    string? MintedByDisplayName = null);
+    string? MintedByDisplayName = null,
+    IReadOnlyCollection<SubjectSelector>? AdditionalSubjects = null);
 
 /// <summary>
 /// The plaintext key exists only here, only once. It is never stored and cannot be recovered.
@@ -74,13 +79,19 @@ public sealed class MintingService(
         if (request.Permissions.Count == 0)
             throw new MintingRefusedException("A key with no permissions would do nothing.");
 
-        if (!caller.MayActAsAnySubject && !caller.Subjects.Contains(request.MintUnderSubject))
-            throw new MintingRefusedException(
-                $"Cannot mint under '{request.MintUnderSubject}': the caller does not hold it.");
+        SubjectSelector[] subjects = [request.MintUnderSubject, .. (request.AdditionalSubjects ?? []).Where(x => x != request.MintUnderSubject).Distinct()];
 
-        // Always evaluated against the target subject alone, unrestricted caller or not: acting for a role means
+        foreach (var subject in subjects)
+        {
+            if (!caller.MayActAsAnySubject && !caller.Subjects.Contains(subject))
+                throw new MintingRefusedException(
+                    $"Cannot mint under '{subject}': the caller does not hold it.");
+        }
+
+        // Always evaluated against the target subjects alone, unrestricted caller or not: acting for a role means
         // taking that role's grants, not adding one's own to them.
-        var authorityResult = await GetAuthorityAsync(request.Scope, new MintingCaller([request.MintUnderSubject]), token);
+        var grants = await grantStore.GetAllAsync(request.Scope, token);
+        var authorityResult = authority.Evaluate(grants, new MintingCaller(subjects), policyCatalog.KnownPermissions);
 
         var refused = request.Permissions
             .Where(x => !authorityResult.DelegablePermissions.Contains(x))
@@ -112,7 +123,7 @@ public sealed class MintingService(
             HashAlgorithmId: algorithmId,
             Permissions: request.Permissions
                 .Distinct(StringComparer.Ordinal)
-                .Select(x => new MintedKeyPermission(x, authorityResult.For(x)?.BackingGrantIds.FirstOrDefault()))
+                .Select(x => Backed(x, grants, subjects))
                 .ToArray(),
             MintedUnderSubject: request.MintUnderSubject,
             Label: request.Label.Trim(),
@@ -139,6 +150,25 @@ public sealed class MintingService(
 
         _logger.LogInformation("Revoked api key {keyId} by {revokedBy}: {reason}",
             keyId, revokedBy ?? "(unknown)", reason ?? "(no reason given)");
+    }
+
+    /// <summary>
+    /// The permission with the grant (and so the subject) backing it. Several of the requested subjects may hold a
+    /// grant for it; the most generous lifetime wins, as in <see cref="MintingAuthority"/>, then the order the subjects
+    /// were given in, so the main subject is preferred.
+    /// </summary>
+    private static MintedKeyPermission Backed(string permission, IReadOnlyCollection<MintingGrant> grants, SubjectSelector[] subjects)
+    {
+        var grant = grants
+            .Where(x => x.IsActive
+                        && string.Equals(x.GrantablePermission, permission, StringComparison.Ordinal)
+                        && subjects.Contains(x.Subject))
+            .OrderBy(x => x.MaxKeyLifetime is null ? 0 : 1)
+            .ThenByDescending(x => x.MaxKeyLifetime)
+            .ThenBy(x => Array.IndexOf(subjects, x.Subject))
+            .First();
+
+        return new MintedKeyPermission(permission, grant.Id, grant.Subject);
     }
 
     /// <returns>How long the key lives, or null for a key that never expires.</returns>
