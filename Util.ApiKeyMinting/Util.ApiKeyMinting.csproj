@@ -13,7 +13,7 @@
 
 		<!-- NuGet -->
 		<PackageId>Xen.Utils.ApiKeyMinting</PackageId>
-		<Version>4.0.1</Version>
+		<Version>4.1.0</Version>
 		<Description>Delegated, self-service API key minting: who may hand out which permissions, for how long, and whether an issued key is still worth anything. Carries no framework dependencies - permissions and policies are plain strings, and persistence is an interface.</Description>
 		<PackageTags>api;security;authorization;apikey</PackageTags>
 
