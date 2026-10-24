@@ -12,14 +12,28 @@ binding lives in `Xen.Utils.AspnetAuthorizationHelper.Minting`.
 A permission on a key is live **only while an active grant still authorises that permission for the subject the
 key was minted under**. Everything else follows from that:
 
-- The minter changing role or leaving does not affect the key. Validity follows the rule, never the person — which
-  is why keys are required to expire.
+- By default the minter changing role or leaving does not affect the key. Validity follows the rule, never the
+  person - which is why keys are required to expire. For personal delegations see below.
 - Withdrawing a grant suspends every key that depended on it, immediately and without touching those keys.
 - Reinstating the grant revives them. The check matches on `(subject, permission)`, not on the grant id recorded at
   mint time, because reinstating often means re-creating and that yields a new id.
 - One key can span several subjects the caller holds (`MintRequest.AdditionalSubjects`), for someone with
   several roles. Each permission then records the subject backing it, and only that subject's grant decides
   whether it is live.
+
+## Keys that follow their minter
+
+Some keys are personal delegations: "my script may do what I may do, as long as I may". Mint them with
+`Validity = KeyValidity.FollowsMinter` (and `MintedBy` set). Such a key's permissions are live only while the grant is
+active **and** the minter still holds the subject backing them, as the host's `IMinterSubjectSource` reports it. Losing
+the role suspends the key; regaining it revives it.
+
+- Keys are `KeyValidity.FollowsGrant` unless asked otherwise, so existing keys and stores behave as before. Stores
+  that should support personal keys persist `MintedKey.Validity`.
+- Register `IMinterSubjectSource` with a lifetime the authorizer can consume (it is a singleton in the ASP.NET binding).
+  Without it, minter-bound keys carry nothing: failing closed is the only safe reading of "follows the minter".
+- Use grant-following keys for automation that must outlive any one person (a team's nightly sync), minter-following
+  keys for personal scripts and tools.
 
 ## Pieces
 

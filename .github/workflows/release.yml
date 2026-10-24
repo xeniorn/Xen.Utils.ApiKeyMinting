@@ -1,0 +1,73 @@
+# Publishes the package to nuget.org when a version tag (vX.Y.Z) is pushed. Publishing is irreversible (a version number
+# is burned even if the package is unlisted), so it happens here, from a tag, and never from a developer machine.
+#
+# No long-lived API key: NuGet Trusted Publishing. GitHub issues a short-lived OIDC token for this workflow run,
+# nuget.org checks it against a trusted publishing policy and returns an API key valid for one hour.
+#
+# One-time setup on nuget.org (Account > Trusted Publishing > add a policy):
+#   Repository Owner: xeniorn      Repository: Xen.Utils.ApiKeyMinting      Workflow File: release.yml      Environment: (empty)
+#   Scopes: new packages and new versions, for the glob Xen.Utils.ApiKeyMinting*
+# One-time setup on GitHub: a repository secret NUGET_USER holding the nuget.org profile name.
+# The SDKs are given by version range rather than global.json: the package targets net8.0 and net10.0.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-[A-Za-z0-9]+"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - run: dotnet test Xen.Utils.ApiKeyMinting.slnx -c Release
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write   # lets this job request the GitHub OIDC token that NuGet/login exchanges for an API key
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - name: Pack
+        run: dotnet pack Xen.Utils.ApiKeyMinting.slnx -c Release -o artifacts /p:ContinuousIntegrationBuild=true
+      - name: Check that the package version matches the tag
+        run: |
+          for f in artifacts/*.nupkg; do
+            case "$f" in *"${GITHUB_REF_NAME#v}.nupkg") ;; *) echo "$f does not match tag $GITHUB_REF_NAME" >&2; exit 1 ;; esac
+          done
+      # last step before the push: the key it returns expires after one hour
+      - name: NuGet login (OIDC to a short-lived API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }}
+      - name: Push to nuget.org
+        run: dotnet nuget push "artifacts/*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" --skip-duplicate

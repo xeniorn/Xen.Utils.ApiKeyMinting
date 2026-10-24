@@ -1,7 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-	<!-- packaging, publishing and the NuGet push target, shared by every package here -->
+	<!-- packaging metadata shared by every package here; publishing is CI from a version tag -->
 	<Import Project="..\Packaging.props" />
+	<Import Project="..\CSharpConventions.props" />
 
 
 	<PropertyGroup>
@@ -13,7 +14,6 @@
 
 		<!-- NuGet -->
 		<PackageId>Xen.Utils.ApiKeyMinting</PackageId>
-		<Version>4.1.0</Version>
 		<Description>Delegated, self-service API key minting: who may hand out which permissions, for how long, and whether an issued key is still worth anything. Carries no framework dependencies - permissions and policies are plain strings, and persistence is an interface.</Description>
 		<PackageTags>api;security;authorization;apikey</PackageTags>
 

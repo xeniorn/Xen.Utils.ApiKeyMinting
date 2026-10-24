@@ -1,6 +1,19 @@
 namespace Util.ApiKeyMinting;
 
 /// <summary>
+/// The subjects a minter holds right now. Needed only for keys minted with <see cref="KeyValidity.FollowsMinter"/>;
+/// called on the authentication path for those keys, so implementations should be cheap (cache per request).
+/// </summary>
+public interface IMinterSubjectSource
+{
+    /// <summary>
+    /// The subjects <paramref name="mintedBy"/> currently holds in <paramref name="scope"/>; empty for a minter that no
+    /// longer exists. Never throw for an unknown minter: that is the normal way a personal key lapses.
+    /// </summary>
+    Task<IReadOnlyCollection<SubjectSelector>> GetCurrentSubjectsAsync(string scope, string mintedBy, CancellationToken token = default);
+}
+
+/// <summary>
 /// Persistence for delegation rules. Implement with whatever the host already uses - EF Core, Dapper, a document
 /// store, or an in-memory list for tests.
 /// </summary>

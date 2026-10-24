@@ -1,59 +1,34 @@
 <Project>
 
 	<!--
-	    Shared packaging setup for every project in this repository that ships a NuGet package.
-
-	    Imported explicitly by each csproj rather than picked up automatically as Directory.Build.props, so a
-	    project states its heritage on its own face: you can see where its packaging comes from without knowing
-	    the folder layout.
-
-	    A csproj keeps only what is genuinely its own - PackageId, Version, Description, PackageTags, and its
-	    target framework.
+	    Shared packaging setup for every packable project in this repository (template: xeniorn/ProcessTools).
+	    Imported explicitly by each packable csproj, which keeps only PackageId, Description, PackageTags and its
+	    target frameworks. The version comes from the git tag via MinVer (CSharpConventions.props).
+	    Nothing here pushes: publishing is done by CI from a version tag (.github/workflows/release.yml), to nuget.org.
 	-->
 
 	<PropertyGroup>
 		<Authors>Juraj Ahel</Authors>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
-		<PackageReadmeFile Condition="Exists('$(MSBuildProjectDirectory)\README.md')">README.md</PackageReadmeFile>
+		<RepositoryUrl>https://github.com/xeniorn/Xen.Utils.ApiKeyMinting</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageProjectUrl>https://github.com/xeniorn/Xen.Utils.ApiKeyMinting</PackageProjectUrl>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
 
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<EmbedAllSources>true</EmbedAllSources>
-		<ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
-		<Deterministic>true</Deterministic>
 		<DebugType>embedded</DebugType>
+		<Deterministic>true</Deterministic>
+		<PublishRepositoryUrl>true</PublishRepositoryUrl>
 	</PropertyGroup>
 
-	<ItemGroup Condition="Exists('$(MSBuildProjectDirectory)\README.md')">
-		<None Include="README.md" Pack="true" PackagePath="\" />
+	<!-- CI-marked build: reproducible from the tag (CI only; breaks local debugging). -->
+	<PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+		<ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Visible="false" />
 	</ItemGroup>
-
-	<PropertyGroup>
-		<!--This entry needs to exist in nuget.config-->
-		<NugetSourceName>github_vbc_proteomics</NugetSourceName>
-		<!--This env var needs to exist and hold a PAT with write access to the feed-->
-		<NugetApiKeyEnvVar>TOKEN_GITHUB_NUGET_VBCPROTEOMICS</NugetApiKeyEnvVar>
-	</PropertyGroup>
-
-	<!--
-	    Publish on pack, for local development: packing in Debug OR Release always ends with the Release
-	    artifact going to the feed.
-	    TODO: use this mechanism only for devel. Use github actions on a tagged version for the real release.
-
-	    Both the pack and the push name Release deliberately. This previously packed Release and then pushed
-	    $(PackageOutputPath), which in a Debug build resolves to bin\Debug - so every package published this way
-	    shipped unoptimised IL with DEBUG defined, and the Release artifact it had just built was discarded.
-
-	    Split into two targets rather than one guarded by Configuration != Release: the Debug entry point
-	    launches a nested `dotnet pack` process to produce the Release artifact, and that nested process is
-	    itself a fresh build with Configuration=Release - so it runs NugetPushRelease on its own and pushes.
-	    A single target with an inverted condition would push a second time from the outer Debug process too.
-	-->
-	<Target Name="NugetRepackRelease" AfterTargets="Pack" Condition="'$(Configuration)' == 'Debug'">
-		<Exec Command="dotnet pack &quot;$(MSBuildProjectFullPath)&quot; --configuration Release" />
-	</Target>
-
-	<Target Name="NugetPushRelease" AfterTargets="Pack" Condition="'$(Configuration)' == 'Release'">
-		<Exec Command="dotnet nuget push &quot;$(MSBuildProjectDirectory)\bin\Release\$(PackageId).$(PackageVersion).nupkg&quot; --source $(NugetSourceName) --api-key %$(NugetApiKeyEnvVar)% --skip-duplicate" />
-	</Target>
 
 </Project>

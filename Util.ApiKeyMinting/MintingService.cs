@@ -32,7 +32,14 @@ public sealed record MintRequest(
     string? Description = null,
     string? MintedBy = null,
     string? MintedByDisplayName = null,
-    IReadOnlyCollection<SubjectSelector>? AdditionalSubjects = null);
+    IReadOnlyCollection<SubjectSelector>? AdditionalSubjects = null)
+{
+    /// <summary>
+    /// <see cref="KeyValidity.FollowsMinter"/> for a personal delegation that must lapse with the minter's role;
+    /// requires <see cref="MintedBy"/>. An init property, so callers compiled against earlier versions keep working.
+    /// </summary>
+    public KeyValidity Validity { get; init; } = KeyValidity.FollowsGrant;
+}
 
 /// <summary>
 /// The plaintext key exists only here, only once. It is never stored and cannot be recovered.
@@ -78,6 +85,9 @@ public sealed class MintingService(
 
         if (request.Permissions.Count == 0)
             throw new MintingRefusedException("A key with no permissions would do nothing.");
+
+        if (request.Validity == KeyValidity.FollowsMinter && string.IsNullOrWhiteSpace(request.MintedBy))
+            throw new MintingRefusedException("A key that follows its minter needs to know who the minter is (MintedBy).");
 
         SubjectSelector[] subjects = [request.MintUnderSubject, .. (request.AdditionalSubjects ?? []).Where(x => x != request.MintUnderSubject).Distinct()];
 
@@ -131,7 +141,10 @@ public sealed class MintingService(
             ExpiresUtc: lifetime is { } span ? nowUtc + span : null,
             Description: request.Description,
             MintedBy: request.MintedBy,
-            MintedByDisplayName: request.MintedByDisplayName);
+            MintedByDisplayName: request.MintedByDisplayName)
+        {
+            Validity = request.Validity,
+        };
 
         await keyStore.AddAsync(key, token);
 

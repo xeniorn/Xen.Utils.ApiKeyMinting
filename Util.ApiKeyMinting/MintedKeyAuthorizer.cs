@@ -30,17 +30,34 @@ public sealed record MintedKeyAuthorization(
 /// is deleted and re-created gets a new id, and the keys must survive that.
 /// </para>
 /// <para>
-/// Validity follows the rule, never the person. Whoever minted the key may have changed role or left; that has no
-/// bearing here, which is why keys are required to expire.
+/// By default validity follows the rule, never the person. Whoever minted the key may have changed role or left;
+/// that has no bearing here, which is why keys are required to expire.
+/// </para>
+/// <para>
+/// A key minted with <see cref="KeyValidity.FollowsMinter"/> additionally needs its minter to still hold the subject
+/// backing each permission, as <see cref="IMinterSubjectSource"/> reports it right now. Without a source registered
+/// such keys carry nothing: failing closed is the only safe reading of "follows the minter".
 /// </para>
 /// </remarks>
 public sealed class MintedKeyAuthorizer(
     IMintedKeyStore keyStore,
     IMintingGrantStore grantStore,
     MintingOptions options,
+    IMinterSubjectSource? minterSubjects,
     TimeProvider? timeProvider = null,
     ILogger<MintedKeyAuthorizer>? logger = null)
 {
+    /// <summary>The constructor of earlier versions: no minter subject source, so minter-bound keys carry nothing.</summary>
+    public MintedKeyAuthorizer(
+        IMintedKeyStore keyStore,
+        IMintingGrantStore grantStore,
+        MintingOptions options,
+        TimeProvider? timeProvider = null,
+        ILogger<MintedKeyAuthorizer>? logger = null)
+        : this(keyStore, grantStore, options, null, timeProvider, logger)
+    {
+    }
+
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private readonly ILogger _logger = logger ?? NullLogger<MintedKeyAuthorizer>.Instance;
 
@@ -79,6 +96,25 @@ public sealed class MintedKeyAuthorizer(
             .Where(x => stillGranted.Contains((key.SubjectOf(x), x.Permission)))
             .Select(x => x.Permission)
             .ToHashSet(StringComparer.Ordinal);
+
+        if (key.Validity == KeyValidity.FollowsMinter && live.Count > 0)
+        {
+            var minterHolds = await MinterSubjectsAsync(scope, key, token);
+            live = key.Permissions
+                .Where(x => live.Contains(x.Permission) && minterHolds.Contains(key.SubjectOf(x)))
+                .Select(x => x.Permission)
+                .ToHashSet(StringComparer.Ordinal);
+
+            if (live.Count == 0)
+            {
+                _logger.LogInformation(
+                    "Api key {keyId} ({label}) follows its minter {mintedBy}, who no longer holds the subjects backing it. " +
+                    "It revives if they regain them.",
+                    key.Id, key.Label, key.MintedBy);
+
+                return new MintedKeyAuthorization(MintedKeyStatus.Suspended, key, Empty);
+            }
+        }
 
         if (live.Count == 0)
         {
@@ -119,6 +155,24 @@ public sealed class MintedKeyAuthorizer(
         {
             _logger.LogWarning(ex, "Failed recording last use of api key {keyId}", key.Id);
         }
+    }
+
+    private async Task<IReadOnlySet<SubjectSelector>> MinterSubjectsAsync(string scope, MintedKey key, CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(key.MintedBy))
+        {
+            _logger.LogWarning("Api key {keyId} follows its minter but records none; it carries nothing.", key.Id);
+            return new HashSet<SubjectSelector>();
+        }
+
+        if (minterSubjects is null)
+        {
+            _logger.LogWarning(
+                "Api key {keyId} follows its minter, but no IMinterSubjectSource is registered; it carries nothing.", key.Id);
+            return new HashSet<SubjectSelector>();
+        }
+
+        return (await minterSubjects.GetCurrentSubjectsAsync(scope, key.MintedBy, token)).ToHashSet();
     }
 
     private static IReadOnlySet<string> Empty => new HashSet<string>(StringComparer.Ordinal);

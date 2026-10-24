@@ -107,6 +107,30 @@ public sealed record MintedKey(
     /// <summary>Expiry is mandatory, because a key outlives whoever minted it and their role changes.</summary>
     /// <summary>A key with no expiry never becomes stale on its own; only revocation or a lost grant stops it.</summary>
     public bool IsExpiredAt(DateTimeOffset nowUtc) => ExpiresUtc is { } expiry && expiry <= nowUtc;
+
+    /// <summary>
+    /// What keeps the key's permissions live besides their grants. Defaults to <see cref="KeyValidity.FollowsGrant"/>,
+    /// which is what every key minted before this existed is, so stores that do not persist it keep their behaviour.
+    /// </summary>
+    /// <remarks>An init property rather than a constructor parameter, so code compiled against earlier versions keeps working.</remarks>
+    public KeyValidity Validity { get; init; } = KeyValidity.FollowsGrant;
+}
+
+/// <summary>Whose standing decides whether a key's permissions are still live.</summary>
+public enum KeyValidity
+{
+    /// <summary>
+    /// The rule alone: a permission is live while an active grant authorises it for its subject. The minter changing
+    /// role or leaving does not matter. For keys of a team or an automation that must outlive any one person.
+    /// </summary>
+    FollowsGrant = 0,
+
+    /// <summary>
+    /// The rule and the person: additionally, the minter (<see cref="MintedKey.MintedBy"/>) must still hold the subject
+    /// backing the permission, as reported by <see cref="IMinterSubjectSource"/>. A personal delegation: the key lapses
+    /// when its minter loses the role, and revives if they regain it.
+    /// </summary>
+    FollowsMinter = 1,
 }
 
 /// <summary>
